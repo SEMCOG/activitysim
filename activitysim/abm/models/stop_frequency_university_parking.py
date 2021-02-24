@@ -31,6 +31,10 @@ def stop_frequency_university_parking(
     """
 
     trace_label = 'stop_frequency_university_parking'
+    model_settings_file_name = 'stop_frequency_university_parking.yaml'
+
+    model_settings = config.read_model_settings(model_settings_file_name)
+    parking_name = model_settings['PARKING_TRIP_NAME']
 
     trips = trips.to_frame()
     tours = tours.to_frame()
@@ -108,7 +112,7 @@ def stop_frequency_university_parking(
 
     park_trips = (park_to_campus | park_from_campus)
 
-    trip_choosers.loc[park_trips, 'purpose'] = 'parking'
+    trip_choosers.loc[park_trips, 'purpose'] = parking_name
     trip_choosers.loc[park_trips, 'destination_logsum'] = pd.NA
     trip_choosers.loc[park_trips, 'destination'] = \
         trip_choosers.loc[park_trips, 'univ_parking_zone_id']
@@ -137,6 +141,8 @@ def stop_frequency_university_parking(
 
     trips['origin'] = trips['origin'].astype(int)
     trips['destination'] = trips['destination'].astype(int)
+    trips['trip_id_pre_parking'] = trips['trip_id']
+    trips['tour_includes_parking'] = np.where(trips['tour_id'].isin(tours_with_parking.index), 1, 0)
 
     # resetting trip_id's
     # taken from stop_frequency.py

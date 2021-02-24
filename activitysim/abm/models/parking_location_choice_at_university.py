@@ -35,6 +35,7 @@ def parking_location_choice_at_university(
 
     univ_codes_col = model_settings['LANDUSE_UNIV_CODE_COL_NAME']
     univ_codes = model_settings['UNIV_CODES_THAT_REQUIRE_PARKING']
+    random_state = model_settings['RANDOM_STATE']
 
     parking_spaces_col = model_settings['LANDUSE_PARKING_SPACES_COL_NAME']
     parking_univ_code_col = model_settings['LANDUSE_PARKING_UNIV_CODE_COL_NAME']
@@ -88,7 +89,8 @@ def parking_location_choice_at_university(
         tour_choosers.loc[parking_tours, 'univ_parking_zone_id'] = parking_univ_zones.zone_id.sample(
             n=num_parking_tours,
             weights=parking_univ_zones[parking_spaces_col],
-            replace=True).to_numpy()
+            replace=True,
+            random_state=random_state).to_numpy()
 
         logger.info("Selected parking locations for %s tours for university with code: %s",
                     num_parking_tours, univ_code)

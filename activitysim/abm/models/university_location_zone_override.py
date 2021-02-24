@@ -42,6 +42,7 @@ def resample_school_zones(choosers, land_use, model_settings, col_to_override='s
     univ_enrollment_col_name = model_settings['LANDUSE_UNIV_ENROL_COL_NAME']
     landuse_univ_code_col_name = model_settings['LANDUSE_UNIV_CODE_COL_NAME']
     allowed_univ_codes = model_settings['UNIV_CODES_TO_OVERRIDE']
+    random_state = model_settings['RANDOM_STATE']
 
     if original_zone_col_name is not None:
         choosers[original_zone_col_name] = pd.NA
@@ -70,7 +71,8 @@ def resample_school_zones(choosers, land_use, model_settings, col_to_override='s
         choosers.loc[choosers_to_override, col_to_override] = univ_land_use.zone_id.sample(
             n=num_choosers_to_override,
             weights=univ_land_use[univ_enrollment_col_name],
-            replace=True).to_numpy()
+            replace=True,
+            random_state=random_state).to_numpy()
 
     return choosers
 
@@ -130,7 +132,7 @@ def university_location_zone_override(
 
 @inject.step()
 def trip_destination_univ_zone_override(
-        trips, land_use,
+        trips, tours, land_use,
         chunk_size, trace_hh_id):
     """
     This model overrides the university trip destination zone for students attending large universities.
@@ -145,21 +147,34 @@ def trip_destination_univ_zone_override(
 
     trace_label = 'trip_destination_univ_zone_override'
     model_settings_file_name = 'university_location_zone_override.yaml'
+    model_settings = config.read_model_settings(model_settings_file_name)
+    univ_purpose = model_settings['TRIP_UNIVERSITY_PURPOSE']
+    tour_mode_override_dict = model_settings['TOUR_MODE_OVERRIDE_DICT']
 
     choosers = trips.to_frame()
     land_use_df = land_use.to_frame()
+    tours = tours.to_frame()
 
     # primary trips are outbound trips where the next trip is not outbound
     choosers['is_primary_trip'] = np.where(
         (choosers['outbound'] == True) & (choosers['outbound'].shift(-1) == False),
         True, False)
     print(choosers['is_primary_trip'].value_counts())
-    choosers = choosers[~(choosers['is_primary_trip']) & (choosers['purpose'] == 'univ')]
-    # choosers = choosers[(choosers['purpose'] == 'univ')]
+    choosers = choosers[~(choosers['is_primary_trip']) & (choosers['purpose'] == univ_purpose)]
+
+    # changing tour mode according to model settings to avoid, e.g. really long walk trips
+    # This has to be done here and not in university_location_zone_override because
+    # this model comes after tour mode choice
+    if tour_mode_override_dict is not None:
+        tours_with_trip_resampled = choosers['tour_id']
+        for orig_tour_mode, new_tour_mode in tour_mode_override_dict.items():
+            tour_overrides = ((tours.index.isin(choosers.tour_id))
+                & (tours['tour_mode'] == orig_tour_mode))
+            logger.info("Changing %d tours with mode %s to mode %s",
+                        tour_overrides.sum(), orig_tour_mode, new_tour_mode)
+            tours.loc[tour_overrides, 'tour_mode'] = new_tour_mode
 
     logger.info("Running %s for %d university students", trace_label, len(choosers))
-
-    model_settings = config.read_model_settings(model_settings_file_name)
 
     choosers = resample_school_zones(
         choosers, land_use_df, model_settings, col_to_override='destination')
@@ -184,6 +199,7 @@ def trip_destination_univ_zone_override(
                   original_zone_col_name] = choosers[original_zone_col_name]
 
     pipeline.replace_table("trips", trips)
+    pipeline.replace_table("tours", tours)
 
     tracing.print_summary('trip_destination_univ_zone_override for zones',
                           trips[original_zone_col_name],
