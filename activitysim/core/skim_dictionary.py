@@ -125,7 +125,8 @@ class OffsetMapper(object):
 
         elif self.offset_int:
             assert (self.offset_series is None)
-            offsets = zone_ids + self.offset_int
+            # apply integer offset, but map NOT_IN_SKIM_ZONE_ID to self
+            offsets = np.where(zone_ids == NOT_IN_SKIM_ZONE_ID, NOT_IN_SKIM_ZONE_ID, zone_ids + self.offset_int)
         else:
             offsets = zone_ids
 
