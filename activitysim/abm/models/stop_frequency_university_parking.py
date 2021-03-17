@@ -141,10 +141,11 @@ def stop_frequency_university_parking(
 
     trips['origin'] = trips['origin'].astype(int)
     trips['destination'] = trips['destination'].astype(int)
-    trips['trip_id_pre_parking'] = trips['trip_id']
     trips['tour_includes_parking'] = np.where(trips['tour_id'].isin(tours_with_parking.index), 1, 0)
 
     # resetting trip_id's
+    trips['trip_id_pre_parking'] = trips['trip_id']
+
     # taken from stop_frequency.py
     # With 4 trips per leg originally, can have an additional 4 parking trips per leg
     # e.g. if trips 1 and 3 are on university, need parking to and from 1 and parking

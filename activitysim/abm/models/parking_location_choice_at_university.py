@@ -17,9 +17,49 @@ from .util import estimation
 logger = logging.getLogger(__name__)
 
 
+def closest_parking_zone_xwalk(univ_zones, parking_zones, network_los):
+    """
+    Create lookup table matching university zone to nearest parking location.
+    If university zone has parking, that zone is selected.
+
+    Parameters
+    ----------
+    univ_zones : pandas.Series
+        zones to find the nearest parking location for
+    parking_zones : pandas.Series
+        zones with parking spaces
+    network_los : Network_LOS object
+        skim information
+
+    Returns
+    -------
+    closest_parking_df : pandas.DataFrame
+        index of university zone input parameter and a column closest_parking_zone
+    """
+    skim_dict = network_los.get_default_skim_dict()
+
+    closest_zones = []
+    for univ_zone in univ_zones.to_numpy():
+        if univ_zone in parking_zones.to_numpy():
+            # if zone has parking data, choose that zone
+            closest_zones.append(univ_zone)
+        else:
+            # find nearest zone from distance skim
+            parking_zone_idx = np.argmin(
+                skim_dict.lookup(univ_zone, parking_zones.to_numpy(), 'DIST'))
+            parking_zone = parking_zones.to_numpy()[parking_zone_idx]
+            closest_zones.append(parking_zone)
+
+    closest_parking_df = pd.DataFrame(
+        {'univ_zone': univ_zones, 'closest_parking_zone': closest_zones})
+    closest_parking_df.set_index('univ_zone', inplace=True)
+
+    return closest_parking_df
+
+
 @inject.step()
 def parking_location_choice_at_university(
-        trips, tours, land_use,
+        trips, tours, land_use, network_los,
         chunk_size, trace_hh_id):
     """
     This model selects a parking location for groups of trips that are on university campuses where
@@ -41,6 +81,7 @@ def parking_location_choice_at_university(
     parking_univ_code_col = model_settings['LANDUSE_PARKING_UNIV_CODE_COL_NAME']
 
     parking_tour_modes = model_settings['TOUR_MODES_THAT_REQUIRE_PARKING']
+    nearest_lot_tour_purposes = model_settings['TOUR_PURPOSES_TO_NEAREST_LOT']
 
     trips = trips.to_frame()
     tours = tours.to_frame()
@@ -51,6 +92,7 @@ def parking_location_choice_at_university(
     tours['univ_parking_zone_id'] = pd.NA
 
     all_univ_zones = land_use_df[land_use_df[univ_codes_col].isin(univ_codes)].index
+    all_parking_zones = land_use_df[land_use_df[parking_spaces_col] > 0].index
 
     # grabbing all trips and tours that have a destination on a campus and selected tour mode
     trip_choosers = trips[trips['destination'].isin(all_univ_zones)]
@@ -65,6 +107,8 @@ def parking_location_choice_at_university(
     trip_choosers.loc[trip_choosers['purpose'] != 'Home', 'parked_at_university'] = True
 
     logger.info("Running %s for %d tours", trace_label, len(tour_choosers))
+
+    closest_parking_df = closest_parking_zone_xwalk(all_univ_zones, all_parking_zones, network_los)
 
     # Set parking locations for each university independently
     for univ_code in univ_codes:
@@ -91,6 +135,14 @@ def parking_location_choice_at_university(
             weights=parking_univ_zones[parking_spaces_col],
             replace=True,
             random_state=random_state).to_numpy()
+
+        # for tours that have purpose specified in model setting, set parking location to
+        # nearest parking lot
+        if nearest_lot_tour_purposes is not None:
+            tours_nearest_lot = (tour_choosers.primary_purpose.isin(nearest_lot_tour_purposes)
+                                & tour_choosers.destination.isin(all_univ_zones))
+            tour_choosers.loc[tours_nearest_lot, 'univ_parking_zone_id'] = tour_choosers.loc[
+                tours_nearest_lot, 'destination'].map(closest_parking_df['closest_parking_zone'])
 
         logger.info("Selected parking locations for %s tours for university with code: %s",
                     num_parking_tours, univ_code)
